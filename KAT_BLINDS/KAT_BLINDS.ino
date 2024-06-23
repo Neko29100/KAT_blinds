@@ -7,8 +7,10 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include "RTClib.h"
 #include "chars.h"
 
+#define TIME_24_HOUR true
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
@@ -20,6 +22,7 @@ uint16_t address2 = 5;
 
 AlarmId id;
 Servo myservo;
+RTC_DS3231 rtc;
 
 using namespace ace_button;
 
@@ -47,18 +50,34 @@ int minutes = 0;
 int minutesNew;
 int hoursNew;
 
+int RTC_SEC;
+int RTC_MIN;
+int RTC_HOUR;
+int RTC_DAY;
+int RTC_MONTH;
+int RTC_YEAR;
+int RTC_DoW;
+
 const int reset_servo = 100;
 const int release_servo = 0;
 bool switch_state = false; // Changed to bool
+bool rtc_synch_state = false;
 
 String timeString;
+
 
 void setup() {
   Serial.begin(57600);
 
+  if (! rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+    Serial.flush();
+    while (1) delay(10);
+  }
+
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
 
-  delay(2000);
+  delay(200);
   display.clearDisplay();
   display.setTextColor(WHITE);
   
@@ -71,11 +90,6 @@ void setup() {
   
   hoursNew = hours;
   minutesNew = minutes;
-
-  Serial.print("Value at address "); Serial.print(address1);  Serial.print(" = "); Serial.println(hours); 
-  Serial.print("Value at address "); Serial.print(address2);  Serial.print(" = "); Serial.println(minutes); 
-  
-  setTime(8,29,29,1,1,11); // set time to Saturday 8:29:00am Jan 1 2011
 
   pinMode(1, INPUT_PULLUP);
   pinMode(2, INPUT_PULLUP);
@@ -92,6 +106,21 @@ void setup() {
 }
 
 void loop() {
+
+  DateTime now = rtc.now();
+
+  if (rtc_synch_state == false){
+  RTC_YEAR = now.year(), DEC;
+  RTC_MONTH = now.month(), DEC;
+  RTC_DAY = now.day(), DEC;
+  RTC_HOUR = now.hour(), DEC;
+  RTC_MIN = now.minute(), DEC;
+  RTC_SEC = now.second(), DEC;
+  RTC_DoW = now.dayOfTheWeek(), DEC;
+  setTime(RTC_HOUR, RTC_MIN, RTC_SEC,RTC_DoW,RTC_MONTH,RTC_YEAR); // set time to Saturday 8:29:00am Jan 1 2011
+  rtc_synch_state = true;
+  }
+
   button1.check();
   button2.check();
   button3.check();
@@ -117,7 +146,7 @@ void loop() {
   
   timeString = String(hours) + "h" + String(minutes) + "m";
 
-  Serial.println(elapsedMillis);
+  //Serial.println(elapsedMillis);
   currentMillis = millis();
   elapsedMillis = currentMillis - previousMillis;
 }
@@ -161,8 +190,6 @@ void MorningAlarm() {
   if (elapsedMillis >= 15000){
     previousMillis = currentMillis;
 
-    Serial.println("Morning Alarm triggered");
-    
     display.clearDisplay();
     display.drawBitmap(0, 0, myBitmap, 128, 64, WHITE);
     display.display();
@@ -173,6 +200,8 @@ void MorningAlarm() {
     moveServoToPosition(reset_servo, release_servo, 1); // Move back to neutral
     elapsedMillis = 0;
     lastButtonPressTime = millis(); // Update last button press time
+
+    rtc_synch_state = false;
   }
 }
 
@@ -211,7 +240,9 @@ void saveAlarmTime() {
   display.print("Alarm Saved!");
 
   display.display();
-        
+
+  Serial.println("meow");
+
   alarm_state = false;    
 
   if (!EEPROM.getCommitASAP()) {

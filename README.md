@@ -3,7 +3,7 @@
 
 ## <ins>- Parts list: </ins>
 - Seeeduino Xiao (ESP32)
-- RTC3107
+- SD3231 RTC Module
 - 3 push buttons
 - 128x64 OLED i2c screen
 - Servomotor
@@ -15,3 +15,8 @@
 - Adafruit_GFX (More screen tings)
 - AceButton (Debouncing of button & press tracking)
 - FlashStorage_SAMD (emulating flash memory as EEPROM, as the ESP32 doesnt have any EEPROM)
+- RTClib (Handling of the SD3231)
+
+## <ins>- Left to add :</ins>
+- Battery charge and discharge
+- PCB
