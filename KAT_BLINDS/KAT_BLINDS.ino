@@ -13,10 +13,10 @@
 #include "chars.h"
 
 #define TIME_24_HOUR true
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
+#define SCREEN_WIDTH 128  // OLED display width, in pixels
+#define SCREEN_HEIGHT 64  // OLED display height, in pixels
 
-#define OLED_RESET -1
+#define OLED_RESET -1  // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 uint16_t address1 = 10;
@@ -26,277 +26,51 @@ AlarmId id;
 Servo myservo;
 RTC_DS3231 rtc;
 
+using namespace ace_button;
 
+AceButton button1(1);
+AceButton button2(2);
+AceButton button3(3);
 
-//ButtonHandler handleEvent;
+void handleEvent(AceButton*, uint8_t, uint8_t);
 
-//void handleEvent(AceButton*, uint8_t, uint8_t);
-
-unsigned long MOVING_TIME = 3000;
+unsigned long MOVING_TIME = 3000;  // moving time is 3 seconds
 
 unsigned long currentMillis;
 unsigned long previousMillis;
 unsigned long elapsedMillis;
-unsigned long lastButtonPressTime = 0;
-int screenTimeout;
+unsigned long lastButtonPressTime = 0;  // Last button press time
+int screenTimeout;              // Screen timeout period (30 seconds)
 
 bool delay_state = false;
 bool alarm_state = false;
-bool alarm_triggered = false;
+bool alarm_triggered = false;  // Flag to track if alarm has triggered
 bool screenOn;
-
-int hours = 0;
-int minutes = 0;
-int minutesNew = 0;
-int hoursNew = 0;
-
-const int reset_servo = 100;
-const int release_servo = 0;
-bool switch_state = false;
-bool rtc_synch_state = false;
 bool time_display_state = false;
 
 String timeString;
 String timeDisplayString;
+char *currentDay;
 
-char charArray[100];  // Increase size as needed based on maximum input length
+char charArray[100];  
 String stringTest;
 char delimiters[] = ",";
-int synch_val[6] = { 0 };  // Ensure the array size matches the number of elements you expect
+int synch_val[6] = { 0 };
+char daysOfTheWeek[7][12] = {"S0ndag", "Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "L0rdag"};
 
 
-using namespace ace_button;
+int hours = 0;
+int minutes = 0;
+int minutesNew;
+int hoursNew;
 
-const uint8_t BUTTON1_PIN = 1;
-const uint8_t BUTTON2_PIN = 2;
-const uint8_t BUTTON3_PIN = 3;
-
-ButtonConfig buttonConfig;
-AceButton b1(&buttonConfig, BUTTON1_PIN);
-AceButton b2(&buttonConfig, BUTTON2_PIN);
-AceButton b3(&buttonConfig, BUTTON3_PIN);
-
-class ButtonHandler : public IEventHandler {
-public:
-  explicit ButtonHandler() {}
-
-  void handleEvent(AceButton* button, uint8_t eventType,
-                   uint8_t /*buttonState*/) override {
-    uint8_t pin = button->getPin();
-    switch (eventType) {
-      case AceButton::kEventPressed:
-        {
-          screenTimeout = 15000;
-          uint16_t now = millis();
-          if (pin == 1) {
-            updateTime(-1);
-          } else if (pin == 2) {
-            mIsB1Pressed = true;
-            updateTime(1);
-          } else if (pin == 3) {
-            mIsB2Pressed = true;
-            switch_state = !switch_state;
-            printUpdatedTime();
-          }
-
-          if (checkBothPressed()) {
-            handleBothPressed();
-          }
-
-          break;
-        }
-        lastButtonPressTime = millis();
-
-      case AceButton::kEventLongPressed:
-        screenTimeout = 15000;
-        if (button->getPin() == 3) {
-          saveAlarmTime();
-        }
-        break;
-
-      case AceButton::kEventRepeatPressed:
-        screenTimeout = 15000;
-        //if (time_display_state == false) {
-          if (button->getPin() == 1) {
-            updateTime(-1);
-          } else if (button->getPin() == 2) {
-            updateTime(1);
-          }
-       // }
-        break;
-
-      case AceButton::kEventDoubleClicked:
-        if (button->getPin() == 3) {
-          time_display_state = !time_display_state;
-          time_display();
-          screenTimeout = 30000;
-
-          printUpdatedTime();
-        }
-        break;
-
-      case AceButton::kEventClicked:
-              screenTimeout = 15000;
-        if (time_display_state == false) {
-          if (button->getPin() == 1) {
-            updateTime(-1);
-          } else if (button->getPin() == 2) {
-            updateTime(1);
-          }
-        }
-        break;
-    }
-  }
-
- /* if (time_display_state == true) {
-    time_display();
-  }*/
-
-
-  void handleBothPressed() {
-
-  }
-
-  void time_display() {
-  timeDisplayString = String(hour()) + "h" + String(minute()) + "m" + String(second()) + "s";
-  display.clearDisplay();
-
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.print("meow meow meow meow");
-  display.setCursor(0, 7);
-  display.print("meow meow meow meow");
-
-  display.setTextSize(2);
-  display.setCursor(0, 28);
-  display.print(timeDisplayString);
-
-  display.setTextSize(1);
-  display.setCursor(0, 56);
-  display.print("ello there");
-
-  display.display();
-}
-
-  void saveAlarmTime() {
-    EEPROM.put(address1, minutesNew);
-    EEPROM.put(address2, hoursNew);
-    minutes = minutesNew;
-    hours = hoursNew;
-
-    timeString = String(hoursNew) + "h" + String(minutesNew) + "m";
-    display.clearDisplay();
-
-    // display Alarm Time
-    display.setTextSize(2);
-    display.setCursor(0, 0);
-    display.print("Alarm Time");
-
-    display.setTextSize(3);
-    display.setCursor(0, 28);
-    display.print(timeString);
-
-    display.setTextSize(1);
-    display.setCursor(0, 56);
-    display.print("Alarm Saved!");
-
-    display.display();
-
-    alarm_state = false;
-    rtc_synch_state = false;
-
-    if (!EEPROM.getCommitASAP()) {
-      EEPROM.commit();
-    }
-  }
-
-  void printUpdatedTime() {
-    timeString = String(hoursNew) + "h" + String(minutesNew) + "m";
-
-    display.clearDisplay();
-
-    display.setTextSize(2);
-    display.setCursor(0, 0);
-    display.print("Alarm Time");
-
-    display.setTextSize(3);
-    display.setCursor(0, 28);
-    display.print(timeString);
-
-    if (!switch_state) {
-      display.setTextSize(1);
-      display.setCursor(0, 56);
-      display.print("Modifying Minutes");
-    } else {
-      display.setTextSize(1);
-      display.setCursor(0, 56);
-      display.print("Modifying Hours");
-    }
-
-    display.display();
-  }
-
-  void updateTime(int increment) {
-    if (!switch_state) {  // Update minutes
-      int oldMinutes = minutesNew;
-      minutesNew = (minutesNew + increment + 60) % 60;
-
-      if (increment > 0 && oldMinutes > minutesNew) {
-        // Wrapped around forward
-        hoursNew = (hoursNew + 1 + 24) % 24;
-      } else if (increment < 0 && oldMinutes < minutesNew) {
-        // Wrapped around backward
-        hoursNew = (hoursNew - 1 + 24) % 24;
-      }
-    } else {  // Update hours
-      hoursNew = (hoursNew + increment + 24) % 24;
-    }
-    printUpdatedTime();
-  }
-
-
-private:
-  /**
-     * Determine if a transition to both buttons are pressed at the same time
-     * has happened. Pressing one button up and down, while keeping the other
-     * one pressed should NOT cause this event.
-     */
-  bool checkBothPressed() {
-    bool bothPressed = mIsB1Pressed && mIsB2Pressed;
-    if (bothPressed && !mBothPressed) {
-      mBothPressed = true;
-      return true;
-    } else {
-      return false;
-    }
-  }
-
-private:
-  bool mIsB1Pressed = false;
-  bool mIsB2Pressed = false;
-  bool mBothPressed = false;
-};
-
-ButtonHandler handleEvent;
- 
-void checkButtons() {
-  static uint16_t lastCheck;
-
-  // DO NOT USE delay(5) to do this.
-  // The (uint16_t) cast is required on 32-bit processors, harmless on 8-bit.
-  uint16_t now = millis();
-  if ((uint16_t)(now - lastCheck) >= 5) {
-    lastCheck = now;
-    b1.check();
-    b2.check();
-    b3.check();
-  }
-}
+const int reset_servo = 100;
+const int release_servo = 0;
+bool switch_state = false;  // Changed to bool
+bool rtc_synch_state = false;
 
 void setup() {
-  Serial.begin(9600);
-
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  Serial.begin(57600);
 
   if (!rtc.begin()) {
     for (int i; i <= 60; i++) {
@@ -308,6 +82,8 @@ void setup() {
     }
     while (1) delay(10);
   }
+
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
 
   delay(200);
   display.clearDisplay();
@@ -327,34 +103,34 @@ void setup() {
   pinMode(2, INPUT_PULLUP);
   pinMode(3, INPUT_PULLUP);
 
-  buttonConfig.setIEventHandler(&handleEvent);
-
   ButtonConfig* buttonConfig = ButtonConfig::getSystemButtonConfig();
-  //buttonConfig->setEventHandler(handleEvent);
+  buttonConfig->setEventHandler(handleEvent);
   buttonConfig->setFeature(ButtonConfig::kFeatureClick);
   buttonConfig->setFeature(ButtonConfig::kFeatureDoubleClick);
   buttonConfig->setFeature(ButtonConfig::kFeatureLongPress);
   buttonConfig->setFeature(ButtonConfig::kFeatureRepeatPress);
 
-  checkButtons();
-
-
+  printUpdatedTime();
 }
 
 void loop() {
 
   DateTime now = rtc.now();
+  currentDay = daysOfTheWeek[now.dayOfTheWeek()];
+  
 
   if (rtc_synch_state == false) {
     setTime(now.hour(), now.minute(), now.second(), now.dayOfTheWeek(), now.month(), now.year());
     rtc_synch_state = true;
   }
-  
-  checkButtons();
+
+  button1.check();
+  button2.check();
+  button3.check();
 
   Alarm.delay(1);
   if (!alarm_state) {
-    Alarm.alarmRepeat(hours, minutes, 0, MorningAlarm);
+    Alarm.alarmRepeat(abs(hours), abs(minutes), 0, MorningAlarm);
     alarm_state = true;
   }
 
@@ -368,19 +144,15 @@ void loop() {
   } else {
     if (!screenOn) {
       screenOn = true;
-      //printUpdatedTime();
+      printUpdatedTime();
     }
   }
 
+  if (time_display_state == true) {
+    time_display();
+  }
 
-currentMillis = millis();
-  /*if (millis() > 10000) {
-    Serial.flush();
-    Serial.end();
-  }*/
-
-  static unsigned long lastTime = 0;
-  static unsigned long serialTime = 0;
+  timeString = String(abs(hours)) + "h" + String(abs(minutes)) + "m";
 
   if (Serial.available() > 0) {
     stringTest = Serial.readStringUntil('\n');  // Read until newline character
@@ -405,33 +177,57 @@ void serial_synch() {
   }
 
   rtc.adjust(DateTime(synch_val[0] + 2000, synch_val[1], synch_val[2], synch_val[3], synch_val[4], synch_val[5]));
+  rtc_synch_state = false;
+
+}
+
+void printUpdatedTime() {
+  timeString = String(abs(hoursNew)) + "h" + String(abs(minutesNew)) + "m";
 
   display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(10, 0);
-  display.println("Integers received:");
 
-  // Display each integer value
-  for (int i = 0; i < 6; i++) {
-    display.print("synch_val[");
-    display.print(i);
-    display.print("] = ");
-    display.println(synch_val[i]);
+  display.setTextSize(2);
+  display.setCursor(0, 0);
+  display.print("Alarm Time");
+
+  display.setTextSize(3);
+  display.setCursor(0, 28);
+  display.print(timeString);
+
+  if (!switch_state) {
+    display.setTextSize(1);
+    display.setCursor(0, 56);
+    display.print("Modifying Minutes");
+  } else {
+    display.setTextSize(1);
+    display.setCursor(0, 56);
+    display.print("Modifying Hours");
   }
 
   display.display();
 }
 
 void time_display() {
+
   timeDisplayString = String(hour()) + "h" + String(minute()) + "m" + String(second()) + "s";
   display.clearDisplay();
 
-  display.setTextSize(1);
+  display.setTextSize(2);
   display.setCursor(0, 0);
-  display.print("meow meow meow meow");
-  display.setCursor(0, 7);
-  display.print("meow meow meow meow");
+  int cursorX = 0;
+
+  for (int i = 0; i < strlen(currentDay); i++) {
+    if (currentDay[i] == '0') {
+      // Draw the custom character `ø`
+      display.drawBitmap(cursorX, 3, bitmap_o_12x12, 12, 12, WHITE);
+      cursorX += 12; // Move cursor to the next position
+    } else {
+      // Draw the regular character
+      display.setCursor(cursorX, 0);
+      display.print(currentDay[i]);
+      cursorX += 12; // Move cursor to the next position
+    }
+  }
 
   display.setTextSize(2);
   display.setCursor(0, 28);
@@ -461,12 +257,112 @@ void MorningAlarm() {
     display.drawBitmap(0, 0, myBitmap, 128, 64, WHITE);
     display.display();
 
-    moveServoToPosition(release_servo, reset_servo, -1);
-    Alarm.delay(5000);
-    moveServoToPosition(reset_servo, release_servo, 1);
+    moveServoToPosition(release_servo, reset_servo, -1);  // Move to release position
+    // Move back to neutral after delay
+    Alarm.delay(5000);                                   // Adjust delay as needed
+    moveServoToPosition(reset_servo, release_servo, 1);  // Move back to neutral
     elapsedMillis = 0;
-    lastButtonPressTime = millis();
+    lastButtonPressTime = millis();  // Update last button press time
 
     rtc_synch_state = false;
+  }
+}
+
+void updateTime(int increment) {
+  if (!switch_state) {  // Update minutes
+    int oldMinutes = minutesNew;
+    minutesNew = (minutesNew + increment + 60) % 60;
+
+    if (increment > 0 && oldMinutes > minutesNew) {
+      // Wrapped around forward
+      hoursNew = (hoursNew + 1 + 24) % 24;
+    } else if (increment < 0 && oldMinutes < minutesNew) {
+      // Wrapped around backward
+      hoursNew = (hoursNew - 1 + 24) % 24;
+    }
+  } else {  // Update hours
+    hoursNew = (hoursNew + increment + 24) % 24;
+  }
+  printUpdatedTime();
+}
+
+
+void saveAlarmTime() {
+  EEPROM.put(address1, minutesNew);
+  EEPROM.put(address2, hoursNew);
+  minutes = minutesNew;
+  hours = hoursNew;
+
+  timeString = String(hoursNew) + "h" + String(minutesNew) + "m";
+  display.clearDisplay();
+
+  // display Alarm Time
+  display.setTextSize(2);
+  display.setCursor(0, 0);
+  display.print("Alarm Time");
+
+  display.setTextSize(3);
+  display.setCursor(0, 28);
+  display.print(timeString);
+
+  display.setTextSize(1);
+  display.setCursor(0, 56);
+  display.print("Alarm Saved!");
+
+  display.display();
+
+  //Serial.println("meow");
+
+  alarm_state = false;
+
+  if (!EEPROM.getCommitASAP()) {
+    EEPROM.commit();
+  }
+}
+
+void handleEvent(AceButton* button, uint8_t eventType, uint8_t buttonState) {
+  lastButtonPressTime = millis();  // Update last button press time
+  switch (eventType) {
+    screenTimeout = 15000;
+    case AceButton::kEventClicked:
+      if (time_display_state == false) {
+        if (button->getPin() == 1) {
+          updateTime(-1);
+        } else if (button->getPin() == 2) {
+          updateTime(1);
+        } else if (button->getPin() == 3) {
+          switch_state = !switch_state;  // Toggle switch state
+          printUpdatedTime();
+        }
+      }
+      break;
+
+    case AceButton::kEventLongPressed:
+      screenTimeout = 15000;
+      if (button->getPin() == 3) {
+        saveAlarmTime();
+      }
+      break;
+
+    case AceButton::kEventDoubleClicked:
+      screenTimeout = 30000;
+      if (button->getPin() == 3) {
+        time_display_state = !time_display_state;
+        if (time_display_state == false) {
+          printUpdatedTime();
+        }
+      }
+      break;
+
+    case AceButton::kEventRepeatPressed:
+      screenTimeout = 15000;
+      if (time_display_state == false) {
+        if (button->getPin() == 1) {
+          updateTime(-1);
+        } else if (button->getPin() == 2) {
+          updateTime(1);
+        }
+      }
+      break;
   }
 }
