@@ -9,6 +9,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include "ArduinoLowPower.h"
 #include "RTClib.h"
 #include "chars.h"
 
@@ -40,7 +41,16 @@ unsigned long currentMillis;
 unsigned long previousMillis;
 unsigned long elapsedMillis;
 unsigned long lastButtonPressTime = 0;  // Last button press time
-int screenTimeout;              // Screen timeout period (30 seconds)
+int screenTimeout;                      // Screen timeout period (30 seconds)
+
+unsigned long currentMillis_sleep;
+unsigned long previousMillis_sleep;
+unsigned long elapsedMillis_sleep;
+//unsigned long wakeTime = 600000;
+//unsigned long untill_wakeUp = 8580000;
+unsigned long leadTime = 120; //seconds
+unsigned long wakeTime = 480000; //millis
+unsigned long seconds_to_wake;
 
 bool delay_state = false;
 bool alarm_state = false;
@@ -50,13 +60,13 @@ bool time_display_state = false;
 
 String timeString;
 String timeDisplayString;
-char *currentDay;
+char* currentDay;
 
-char charArray[100];  
+char charArray[100];
 String stringTest;
 char delimiters[] = ",";
 int synch_val[6] = { 0 };
-char daysOfTheWeek[7][12] = {"S0ndag", "Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "L0rdag"};
+char daysOfTheWeek[7][12] = { "S0ndag", "Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "L0rdag" };
 
 
 int hours = 0;
@@ -68,26 +78,34 @@ const int reset_servo = 100;
 const int release_servo = 0;
 bool switch_state = false;  // Changed to bool
 bool rtc_synch_state = false;
+bool state = false;
+
+const int pin = 6;
 
 void setup() {
-  Serial.begin(57600);
-
-  if (!rtc.begin()) {
-    for (int i; i <= 60; i++) {
-      pinMode(PIN_LED2, OUTPUT);
-      digitalWrite(PIN_LED2, HIGH);
-      delay(500);
-      digitalWrite(PIN_LED2, LOW);
-      delay(500);
-    }
-    while (1) delay(10);
-  }
+  Serial.begin(9600);
 
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
 
   delay(200);
   display.clearDisplay();
   display.setTextColor(WHITE);
+  display.display();
+
+  if (!rtc.begin()) {
+    display.clearDisplay();
+
+    display.setTextSize(2);
+    display.setCursor(0, 0);
+    display.print("RTC Failed to begin");
+
+    display.display();
+
+    while (1) delay(10);
+  }
+
+
+
 
   myservo.attach(7);
 
@@ -103,6 +121,10 @@ void setup() {
   pinMode(2, INPUT_PULLUP);
   pinMode(3, INPUT_PULLUP);
 
+  pinMode(pin, INPUT_PULLUP);
+  // Attach a wakeup interrupt on pin 8, calling repetitionsIncrease when the device is woken up
+  LowPower.attachInterruptWakeup(pin, button_trigger, CHANGE);
+
   ButtonConfig* buttonConfig = ButtonConfig::getSystemButtonConfig();
   buttonConfig->setEventHandler(handleEvent);
   buttonConfig->setFeature(ButtonConfig::kFeatureClick);
@@ -115,11 +137,77 @@ void setup() {
 
 void loop() {
 
+  awake_loop();
+
+  time_math();
+
+  if (Serial.available() > 0) {
+    stringTest = Serial.readStringUntil('\n');  // Read until newline character
+    serial_synch();
+  }
+
+
+  if (elapsedMillis_sleep >= wakeTime) {
+    previousMillis_sleep = currentMillis_sleep;
+    rtc_synch_state = false;
+    alarm_state = false;
+    elapsedMillis_sleep = 0;
+    display.clearDisplay();
+    display.display();
+    Serial.end();
+    Alarm.delay(1000);
+    LowPower.deepSleep((seconds_to_wake - leadTime) * 1000);
+  }
+
+  currentMillis_sleep = millis();
+  elapsedMillis_sleep = currentMillis_sleep - previousMillis_sleep;
+}
+
+void time_math() {
+  int temp_hour = hour();
+  int temp_min = minute();
+  int hours_to_midnight = 23 - temp_hour;
+  int min_to_midnight = 60 - temp_min;
+
+  int hours_to_alarm = hours - temp_hour;
+  int min_to_alarm = (minutes - temp_min) + (hours_to_alarm * 60);
+
+  int hours_to_alarm_midnight = hours_to_midnight + hours;
+  int min_to_alarm_midnight = min_to_midnight + minutes;
+
+  int seconds_to_alarm = ((hours_to_alarm_midnight * 60) * 60) + (min_to_alarm_midnight * 60);
+
+  if (seconds_to_alarm >= 86400) {
+    seconds_to_wake = min_to_alarm * 60;
+
+    Serial.print("time to wake : ");
+    Serial.print(min_to_alarm);
+    Serial.println("m");
+  } else {
+    seconds_to_wake = seconds_to_alarm;
+
+    Serial.print("time to wake : ");
+    Serial.print(hours_to_alarm_midnight);
+    Serial.print("h");
+    Serial.print(min_to_alarm_midnight);
+    Serial.println("m");
+  }
+
+  Serial.print("secs to wake : ");
+  Serial.print(seconds_to_wake);
+  Serial.println("s");
+}
+
+void button_trigger() {
+}
+
+void awake_loop() {
+
   DateTime now = rtc.now();
   currentDay = daysOfTheWeek[now.dayOfTheWeek()];
-  
 
-  if (rtc_synch_state == false) {
+
+  if (!rtc_synch_state) {
     setTime(now.hour(), now.minute(), now.second(), now.dayOfTheWeek(), now.month(), now.year());
     rtc_synch_state = true;
   }
@@ -154,11 +242,6 @@ void loop() {
 
   timeString = String(abs(hours)) + "h" + String(abs(minutes)) + "m";
 
-  if (Serial.available() > 0) {
-    stringTest = Serial.readStringUntil('\n');  // Read until newline character
-    serial_synch();
-  }
-
   currentMillis = millis();
   elapsedMillis = currentMillis - previousMillis;
 }
@@ -178,7 +261,6 @@ void serial_synch() {
 
   rtc.adjust(DateTime(synch_val[0] + 2000, synch_val[1], synch_val[2], synch_val[3], synch_val[4], synch_val[5]));
   rtc_synch_state = false;
-
 }
 
 void printUpdatedTime() {
@@ -220,12 +302,12 @@ void time_display() {
     if (currentDay[i] == '0') {
       // Draw the custom character `ø`
       display.drawBitmap(cursorX, 3, bitmap_o_12x12, 12, 12, WHITE);
-      cursorX += 12; // Move cursor to the next position
+      cursorX += 12;  // Move cursor to the next position
     } else {
       // Draw the regular character
       display.setCursor(cursorX, 0);
       display.print(currentDay[i]);
-      cursorX += 12; // Move cursor to the next position
+      cursorX += 12;  // Move cursor to the next position
     }
   }
 
@@ -235,7 +317,7 @@ void time_display() {
 
   display.setTextSize(1);
   display.setCursor(0, 56);
-  display.print("ello there");
+  display.print(seconds_to_wake);
 
   display.display();
 }
@@ -314,6 +396,7 @@ void saveAlarmTime() {
   //Serial.println("meow");
 
   alarm_state = false;
+  state = false;
 
   if (!EEPROM.getCommitASAP()) {
     EEPROM.commit();
